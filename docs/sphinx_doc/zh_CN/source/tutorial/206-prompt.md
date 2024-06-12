@@ -42,6 +42,8 @@ AgentScope为以下的模型API提供了内置的提示构建策略。
 
 #### 提示的构建策略
 
+##### 非视觉（Vision）模型
+
 在OpenAI Chat API中，`name`字段使模型能够区分对话中的不同发言者。因此，`OpenAIChatWrapper`中`format`函数的策略很简单：
 
 - `Msg`: 直接将带有`role`、`content`和`name`字段的字典传递给API。
@@ -73,6 +75,75 @@ print(prompt)
   {"role": "system", "name": "system", "content": "You are a helpful assistant"},
   {"role": "assistant", "name": "Bob", "content": "Hi."},
   {"role": "assistant", "name": "Alice", "content": "Nice to meet you!"),
+]
+```
+
+##### 视觉（Vision）模型
+
+对支持视觉的模型而言，如果输入消息包含图像url，生成的`content`字段将是一个字典的列表，其中包含文本和图像url。
+
+具体来说，如果是网络图片url，将直接传递给OpenAI Chat API，而本地图片url将被转换为base64格式。更多细节请参考[官方指南](https://platform.openai.com/docs/guides/vision)。
+
+注意无效的图片url（例如`/Users/xxx/test.mp3`）将被忽略。
+
+```python
+from agentscope.models import OpenAIChatWrapper
+from agentscope.message import Msg
+
+model = OpenAIChatWrapper(
+    config_name="", # 为空，因为我们直接初始化model wrapper
+    model_name="gpt-4o",
+)
+
+prompt = model.format(
+   Msg("system", "You're a helpful assistant", role="system"),   # Msg 对象
+   [                                                             # Msg 对象的列表
+      Msg(name="user", content="Describe this image", role="user", url="https://xxx.png"),
+      Msg(name="user", content="And these images", role="user", url=["/Users/xxx/test.png", "/Users/xxx/test.mp3"]),
+   ],
+)
+print(prompt)
+```
+
+```python
+[
+    {
+        "role": "system",
+        "name": "system",
+        "content": "You are a helpful assistant"
+    },
+    {
+        "role": "user",
+        "name": "user",
+        "content": [
+            {
+                "type": "text",
+                "text": "Describe this image"
+            },
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": "https://xxx.png"
+                }
+            },
+        ]
+    },
+    {
+        "role": "user",
+        "name": "user",
+        "content": [
+            {
+                "type": "text",
+                "text": "And these images"
+            },
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": "data:image/png;base64,YWJjZGVm..." # 对应 /Users/xxx/test.png
+                }
+            },
+        ]
+    },
 ]
 ```
 
@@ -200,6 +271,46 @@ print(prompt)
 ]
 ```
 
+### LiteLLMChatWrapper
+
+`LiteLLMChatWrapper`封装了litellm聊天API，它接受消息列表作为输入。Litellm支持不同类型的模型，每个模型可能需要遵守不同的格式。为了简化使用，我们提供了一种与大多数模型兼容的格式。如果需要更特定的格式，您可以参考您所使用的特定模型以及[litellm](https://github.com/BerriAI/litellm)文档，来定制适合您模型的格式函数。
+- 格式化聊天历史中的所有消息，将其整合成一个以`"user"`作为`role`的单一消息
+#### 提示策略
+- 消息将包括对话历史，`user`消息由系统消息(system message)和"## Dialog History"前缀。
+
+
+```python
+from agentscope.models import LiteLLMChatWrapper
+
+model = LiteLLMChatWrapper(
+    config_name="", # empty since we directly initialize the model wrapper
+    model_name="gpt-3.5-turbo",
+)
+
+prompt = model.format(
+  Msg("system", "You are a helpful assistant", role="system"),
+  [
+      Msg("user", "What is the weather today?", role="user"),
+      Msg("assistant", "It is sunny today", role="assistant"),
+  ],
+)
+
+print(prompt)
+```
+
+```bash
+[
+    {
+        "role": "user",
+        "content": (
+            "You are a helpful assistant\n\n"
+            "## Dialogue History\nuser: What is the weather today?\n"
+            "assistant: It is sunny today"
+        ),
+    },
+]
+```
+
 ### `OllamaChatWrapper`
 
 `OllamaChatWrapper`封装了Ollama聊天API，它接受消息列表作为输入。消息必须遵守以下规则(更新于2024/03/22)：
@@ -211,8 +322,10 @@ print(prompt)
 
 给定一个消息列表，我们将按照以下规则解析每个消息：
 
-- `Msg`：直接填充`role`和`content`字段。如果它有一个`url`字段，指向一个图片，我们将把它添加到消息中。
-- `List`：根据上述规则解析列表中的每个元素。
+- 如果输入的第一条信息的`role`字段是`"system"`，该条信息将被视为系统提示（system
+ prompt），其他信息将一起组成对话历史。对话历史将添加`"## Dialogue History"`的前缀，并与
+系统提示一起组成一条`role`为`"system"`的信息。
+- 如果输入信息中的`url`字段不为`None`，则这些url将一起被置于`"images"`对应的键值中。
 
 ```python
 from agentscope.models import OllamaChatWrapper
@@ -235,9 +348,11 @@ print(prompt)
 
 ```bash
 [
-  {"role": "system", "content": "You are a helpful assistant"},
-  {"role": "assistant", "content": "Hi."},
-  {"role": "assistant", "content": "Nice to meet you!", "images": ["https://example.com/image.jpg"]},
+  {
+    "role": "system",
+    "content": "You are a helpful assistant\n\n## Dialogue History\nBob: Hi.\nAlice: Nice to meet you!",
+    "images": ["https://example.com/image.jpg"]
+  },
 ]
 ```
 
