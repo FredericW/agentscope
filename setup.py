@@ -55,10 +55,6 @@ rag_requires = [
 
 studio_requires = []
 
-rag_requires = [
-    "llama-index",
-]
-
 # released requires
 minimal_requires = [
     "networkx",
@@ -101,7 +97,6 @@ full_requires = (
     + gradio_requires
     + rag_requires
     + studio_requires
-    + rag_requires
 )
 
 with open("README.md", "r", encoding="UTF-8") as fh:
